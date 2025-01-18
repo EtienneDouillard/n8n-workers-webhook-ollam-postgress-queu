@@ -1,89 +1,94 @@
-Deploying n8n (Main/Worker/Webhook) behind a System-Wide Nginx with PostgreSQL, Redis, and Ollama
-This tutorial walks you through deploying n8n (with worker, webhook, PostgreSQL, Redis, and Ollama) behind an existing Nginx server. We’ll use the domain n8n.example.com as an example. You’ll end up with:
+# Deploying n8n Behind Nginx with Docker, PostgreSQL, Redis, and Ollama
+
+This guide walks through deploying **n8n** (including worker, webhook, PostgreSQL, Redis, and Ollama) behind an existing Nginx server on a Linux host. The goal is to serve **n8n** at **`https://n8n.example.com`** using a secure setup with Let’s Encrypt and Docker.
+
+
+This tutorial walks you through deploying **n8n** (with **worker**, **Webhook processors**, **PostgreSQL**, **Redis**,**Queu Mode**,  and Ollama) behind an existing Nginx server.
+
+This guide will help you to configure this scaling mode : https://docs.n8n.io/hosting/scaling/queue-mode/
+
+We’ll use the domain **n8n.example.com** as an example. You’ll end up with:
 
 Nginx (system installation) listening on ports 80 and 443 for n8n.example.com.
 A Docker stack hosting:
-n8n (main) → 1 CPU
-n8n-worker → 1 CPU
-n8n-webhook → 0.5 CPU
-PostgreSQL, Redis (for queue mode), and Ollama → 1 CPU
+
+    n8n (main) → 1 CPU
+    n8n-worker → 1 CPU
+    n8n-webhook → 0.5 CPU
+    PostgreSQL 
+    Redis (for queue mode)
+    Ollama → 1 CPU
+    
+    
 n8n is accessible only at 127.0.0.1:5678 inside the server, while Nginx proxies external traffic (443) to that internal port.
 HTTPS is managed by Let’s Encrypt (Certbot) on the host.
-Table of Contents
-Server Preparation
-DNS Setup
-Certbot & The Challenge Directory
-Temporarily Disable the Nginx HTTPS Section
-Generate Certificates with Certbot
-Install Additional SSL Files
-Re-enable the HTTPS Section in Nginx
-Create the .env File
-Create the docker-compose.yml File
-Launch the Docker Stack
-Access n8n in HTTPS
-Common Errors & Solutions
-Final Summary
-1) Server Preparation
-1.1 Install Docker & Docker Compose
-On Ubuntu/Debian (example):
 
-bash
-Copier
-# Install Docker
+---
+
+## Prerequisites
+
+- **A Linux server** with a public IP address
+- **A domain name** (e.g., `n8n.example.com`)
+- **Nginx installed** on the server
+- **Docker and Docker Compose** installed
+- A working knowledge of basic Linux commands
+
+---
+
+## 1. Install Required Software
+
+### Docker and Docker Compose
+
+```bash
 sudo apt-get update
-sudo apt-get install -y docker.io
+sudo apt-get install -y docker.io docker-compose-plugin
+```
 
-# Install docker-compose (plugin or standalone)
-sudo apt-get install -y docker-compose-plugin
+### Nginx
 
-# Check Docker Compose version
-docker compose version
-1.2 Install Nginx (if not present)
-bash
-Copier
+```bash
 sudo apt-get install -y nginx
-1.3 Open ports 80 and 443 in the firewall
-bash
-Copier
-sudo ufw allow 80
-sudo ufw allow 443
-sudo ufw reload
-2) DNS Setup
-At your domain registrar (e.g., OVH, Gandi), create an A record for n8n.example.com pointing to your server IP address.
+```
 
-Wait for DNS propagation:
+### Certbot
 
-bash
-Copier
-nslookup n8n.example.com
-dig n8n.example.com
-They should return your server’s public IP.
-
-3) Certbot & The Challenge Directory
-3.1 Install Certbot
-bash
-Copier
-sudo apt-get update
+```bash
 sudo apt-get install -y certbot
-3.2 Create the challenge directory
-bash
-Copier
-sudo mkdir -p /var/www/certbot
-We will use this path to store the HTTP-01 challenge files from Let’s Encrypt.
+```
 
-4) Temporarily Disable the Nginx HTTPS Section
-Before generating the certificate, comment out the HTTPS block so Nginx won’t fail when it can’t find the SSL files. For example, in /etc/nginx/nginx.conf or /etc/nginx/sites-available/default:
+---
 
-nginx
-Copier
-# -------------------------------------------------------------------------
-# Port 80 for n8n.example.com
-# -------------------------------------------------------------------------
+## 2. Configure DNS
+
+At your domain registrar, create an **A record** pointing your domain (e.g., `n8n.example.com`) to your server’s public IP address.
+
+Verify DNS propagation:
+
+```bash
+nslookup n8n.example.com
+```
+
+---
+
+## 3. Prepare the Nginx Configuration
+
+We will set up Nginx to handle both HTTP (port 80) and HTTPS (port 443).
+
+### HTTP (Port 80) Configuration
+
+**Edit your Nginx configuration file**:
+
+```bash
+sudo nano /etc/nginx/nginx.conf
+```
+
+
+
+```nginx.conf
 server {
     listen 80;
     server_name n8n.example.com;
 
-    # Certbot challenge directory
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
@@ -92,65 +97,42 @@ server {
         return 301 https://$host$request_uri;
     }
 }
+```
 
-# -------------------------------------------------------------------------
-# Port 443 (commented out until cert is generated)
-# -------------------------------------------------------------------------
-# server {
-#     listen 443 ssl;
-#     server_name n8n.example.com;
+Save the file, then reload Nginx:
 
-#     ssl_certificate /etc/letsencrypt/live/n8n.example.com/fullchain.pem;
-#     ssl_certificate_key /etc/letsencrypt/live/n8n.example.com/privkey.pem;
-#     include /etc/letsencrypt/options-ssl-nginx.conf;
-#     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-#     location / {
-#         proxy_pass http://127.0.0.1:5678;
-#         proxy_http_version 1.1;
-#         proxy_set_header Upgrade $http_upgrade;
-#         proxy_set_header Connection 'upgrade';
-#         proxy_set_header Host $host;
-#         proxy_cache_bypass $http_upgrade;
-#         proxy_set_header X-Real-IP $remote_addr;
-#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-#         proxy_set_header X-Forwarded-Proto $scheme;
-#     }
-# }
-Verify Nginx configuration and reload:
-
-bash
-Copier
+```bash
 sudo nginx -t
 sudo systemctl reload nginx
-5) Generate Certificates with Certbot
-Now that Nginx won’t fail on missing SSL files:
+```
 
-bash
-Copier
+### Prepare Certbot’s Webroot
+
+Create the directory:
+
+```bash
+sudo mkdir -p /var/www/certbot
+```
+
+---
+
+## 4. Obtain Let’s Encrypt Certificates
+
+Run Certbot with the **webroot** plugin:
+
+```bash
 sudo certbot certonly --webroot -w /var/www/certbot -d n8n.example.com
--w /var/www/certbot is the webroot directory for the challenge.
--d n8n.example.com is your domain.
-If successful, certificates are stored in /etc/letsencrypt/live/n8n.example.com/.
-6) Install Additional SSL Files
-If Nginx complains about missing files like /etc/letsencrypt/options-ssl-nginx.conf or /etc/letsencrypt/ssl-dhparams.pem, you need to create/download them:
+```
 
-6.1 Download options-ssl-nginx.conf
-bash
-Copier
-sudo mkdir -p /etc/letsencrypt
-sudo curl \
-  https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
-  -o /etc/letsencrypt/options-ssl-nginx.conf
-6.2 Generate or download ssl-dhparams.pem
-bash
-Copier
-sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
-7) Re-enable the HTTPS Section in Nginx
-After you have the SSL files:
+When completed, the certificates will be available in **`/etc/letsencrypt/live/n8n.example.com/`**.
 
-nginx
-Copier
+---
+
+## 5. Add HTTPS (Port 443) Configuration
+
+Now that certificates are in place, update the Nginx configuration for HTTPS and add this below your first configuration :
+
+```nginx
 server {
     listen 443 ssl;
     server_name n8n.example.com;
@@ -172,27 +154,139 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-Then:
+```
 
-bash
-Copier
+
+
+Verify you configuration  and reload Nginx:
+```nginx
+# ----------------------------------------------------------------------------
+# Nginx listening on port 80 for the domain n8n.exemple.com
+# ----------------------------------------------------------------------------
+server {
+    listen 80;
+    server_name n8n.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+ # ----------------------------------------------------------------------------
+ # Nginx listening on port 443 for the domain n8n.exemple.com
+ # ----------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    server_name n8n.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/n8n.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/n8n.example.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5678;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+```
+
+
+```bash
 sudo nginx -t
 sudo systemctl reload nginx
-8) Create the .env File
-In /home/n8n-dev (or another directory), create .env:
+```
 
-bash
-Copier
+If Nginx complains about missing files like `/etc/letsencrypt/options-ssl-nginx.conf` or `/etc/letsencrypt/ssl-dhparams.pem`, you need to create/download them:
+
+Download `options-ssl-nginx.conf`
+
+```bash
+sudo mkdir -p /etc/letsencrypt
+sudo curl \
+  https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
+  -o /etc/letsencrypt/options-ssl-nginx.conf
+```
+Generate or download `ssl-dhparams.pem`
+```bash
+sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
+
+```
+
+then 
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+
+---
+
+## 6. Prepare the `.env` File
+
+In your project directory (e.g., `/home/n8n`), create a `.env` file:
+
+```env
 POSTGRES_USER=n8n
-POSTGRES_PASSWORD=myPGpassword
-POSTGRES_DB=n8n_database
+POSTGRES_PASSWORD=securepassword
+POSTGRES_DB=n8n_db
+POSTGRES_NON_ROOT_USER=n8n
+POSTGRES_NON_ROOT_PASSWORD=securepassword
 
-ENCRYPTION_KEY=MyVerySecretKey
-9) Create the docker-compose.yml File
-Place this in /home/n8n-dev/docker-compose.yml:
 
-yaml
-Copier
+
+ENCRYPTION_KEY=mysecretkey
+
+DOMAIN=exemple.com
+
+SSL_EMAIL=youremail.com
+
+GENERIC_TIMEZONE=Europe/Paris
+
+WEBHOOK_URL=https://n8n.exemple.com
+
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+ENCRYPTION_KEY=cryptedkey
+
+EXECUTIONS_MODE=queue
+N8N_DATABASE_TYPE=postgresdb
+N8N_POSTGRES_HOST=postgres
+N8N_POSTGRES_PORT=5432
+N8N_POSTGRES_USER=${POSTGRES_USER}
+N8N_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+N8N_POSTGRES_DB=${POSTGRES_DB}
+
+QUEUE_BULL_REDIS_HOST=${REDIS_HOST}
+QUEUE_BULL_REDIS_PORT=${REDIS_PORT}
+
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=name
+N8N_BASIC_AUTH_PASSWORD=securepassword
+
+
+```
+
+---
+
+## 7. Create the Docker Compose File
+
+Create a `docker-compose.yml` in the same directory:
+
+```yaml
 version: "3.8"
 
 volumes:
@@ -253,7 +347,7 @@ services:
       - "127.0.0.1:5678:5678"
 
     environment:
-      # Database
+      # Base de données
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
@@ -261,19 +355,19 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
 
-      # Queue mode
+      # Mode queue
       - EXECUTIONS_MODE=queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_HEALTH_CHECK_ACTIVE=true
 
-      # Encryption key
+      # Clé de chiffrement
       - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
-      # n8n configuration
-      - N8N_HOST=n8n.example.com
+      # Configuration n8n
+      - N8N_HOST=n8n.exemple.com
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://n8n.example.com/
+      - WEBHOOK_URL=https://n8n.exemple.com/
 
     volumes:
       - n8n_storage:/home/node/.n8n
@@ -293,6 +387,7 @@ services:
       - n8n
     command: worker
     environment:
+      # BDD
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
@@ -300,10 +395,12 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
 
+      # Queue
       - EXECUTIONS_MODE=queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_HEALTH_CHECK_ACTIVE=true
 
+      # Clé de chiffrement
       - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
     deploy:
@@ -322,6 +419,7 @@ services:
       - n8n
     command: webhook
     environment:
+      # BDD
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
@@ -329,10 +427,12 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
 
+      # Queue
       - EXECUTIONS_MODE=queue
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_HEALTH_CHECK_ACTIVE=true
 
+      # Clé de chiffrement
       - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
     deploy:
@@ -341,7 +441,7 @@ services:
           cpus: "0.5"
 
   ##########################################################################
-  # OLLAMA
+  # OLLAMA (CPU)
   ##########################################################################
   ollama:
     image: ollama/ollama:latest
@@ -357,68 +457,69 @@ services:
 networks:
   default:
     name: my_n8n_network
-10) Launch the Docker Stack
-bash
-Copier
-cd /home/n8n-dev  # the folder containing docker-compose.yml and .env
-docker compose up -d
-Check container status:
 
-bash
-Copier
+```
+
+---
+
+## 8. Launch the Docker Stack
+
+Start the containers in detached mode:
+
+```bash
+docker compose up -d
+```
+
+Verify that all services are running:
+
+```bash
 docker compose ps
-You should see Up or healthy for n8n-main, n8n-worker, n8n-webhook, n8n-postgres, n8n-redis, and ollama.
+```
 
-10.1 Test locally
-bash
-Copier
-curl -I http://127.0.0.1:5678
-Should return HTTP/1.1 200 OK or similar.
+You should see **Up** or **healthy** for n8n-main, n8n-worker, n8n-webhook, n8n-postgres, n8n-redis, and ollama.
 
-11) Access n8n in HTTPS
-Open your browser to https://n8n.example.com:
 
-Nginx receives the request on port 443.
-It forwards traffic to 127.0.0.1:5678.
-Docker runs n8n (main + worker + webhook).
-You should see the n8n UI.
-12) Common Errors & Solutions
-Missing /etc/letsencrypt/options-ssl-nginx.conf
-Download it:
+---
 
-bash
-Copier
-sudo curl \
-  https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
-  -o /etc/letsencrypt/options-ssl-nginx.conf
-Missing /etc/letsencrypt/ssl-dhparams.pem
-Generate it:
+## 9. Test the Setup
 
-bash
-Copier
-sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
-Database (PostgreSQL) authentication issues
+Open a browser and navigate to:
 
-Check .env variables: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
-Remove the database volume to reset:
-bash
-Copier
-docker compose down
-docker volume rm n8n_db_storage
-docker compose up -d
-Database migration errors (e.g., duplicate key)
+```
+https://n8n.example.com
+```
 
-Possibly an incomplete or partial migration.
-Clear or re-init the DB volume as above.
-Nginx fails to start
+---
 
-Ensure you commented out the HTTPS block before generating certificates.
-Make sure the certificate files exist after Certbot finishes.
-13) Final Summary
-Disable the HTTPS block in Nginx before generating Let’s Encrypt certificates.
-Generate certs with certbot certonly --webroot ....
-Install missing SSL files (options-ssl-nginx.conf, ssl-dhparams.pem) if required.
-Re-enable the HTTPS block in Nginx referencing the new certificate paths.
-Launch n8n (main, worker, webhook) with PostgreSQL, Redis, and Ollama in Docker, mapping 127.0.0.1:5678 to the container.
-Test https://n8n.example.com—Nginx will proxy to n8n in Docker.
-Congratulations! Your n8n setup is fully secured with HTTPS and backed by a queue system (Redis + PostgreSQL) and Ollama.
+## Troubleshooting
+
+1. **Missing SSL files:**
+   - If `options-ssl-nginx.conf` or `ssl-dhparams.pem` are missing, download or generate them:
+     ```bash
+     sudo curl -o /etc/letsencrypt/options-ssl-nginx.conf \
+       https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf
+     sudo openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
+     ```
+
+2. **PostgreSQL authentication errors:**
+   - Verify `.env` credentials.
+   - If issues persist, reset the database volume:
+     ```bash
+     docker compose down
+     docker volume rm db_storage
+     docker compose up -d
+     ```
+
+---
+
+## Summary
+
+This guide walks you through:
+
+- Setting up Nginx to serve n8n behind HTTPS.
+- Using Let’s Encrypt for certificates.
+- Running n8n, worker, webhook, PostgreSQL, Redis, and Ollama in Docker.
+- Keeping n8n securely accessible only via localhost and Nginx.
+
+With these steps, you now have a reliable and secure n8n instance accessible at **https://n8n.example.com**.
+
