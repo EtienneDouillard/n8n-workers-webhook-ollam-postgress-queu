@@ -1,4 +1,4 @@
-# Deploying n8n scaling queue mode Behind Nginx with Docker, PostgreSQL, Redis, Wokers, Webhook and Ollama
+# Deploying n8n scaling queue mode Behind Nginx with Docker, PostgreSQL, Redis, Workers, Webhook and Ollama
 
 This guide walks through deploying **n8n** (including worker, webhook, PostgreSQL, Redis, and Ollama) behind an existing Nginx server on a Linux host. The goal is to serve **n8n** at **`https://n8n.example.com`** using a secure setup with Let’s Encrypt and Docker.
 
