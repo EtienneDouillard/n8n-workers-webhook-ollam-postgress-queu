@@ -3,7 +3,7 @@
 This guide walks through deploying **n8n** (including worker, webhook, PostgreSQL, Redis, and Ollama) behind an existing Nginx server on a Linux host. The goal is to serve **n8n** at **`https://n8n.example.com`** using a secure setup with Let’s Encrypt and Docker.
 
 
-This tutorial walks you through deploying **n8n** (with **worker**, **Webhook processors**, **PostgreSQL**, **Redis**,**Queu Mode**,  and Ollama) behind an existing Nginx server.
+This tutorial walks you through deploying **n8n** (with , **Webhook processors**, **PostgreSQL**, **Redis**,**Queu Mode**,  and Ollama) behind an existing Nginx server.
 
 This guide will help you to configure this scaling mode : https://docs.n8n.io/hosting/scaling/queue-mode/
 
@@ -408,37 +408,6 @@ services:
         limits:
           cpus: "1"
 
-  ##########################################################################
-  # N8N WEBHOOK
-  ##########################################################################
-  n8n-webhook:
-    image: docker.n8n.io/n8nio/n8n
-    container_name: n8n-webhook
-    restart: always
-    depends_on:
-      - n8n
-    command: webhook
-    environment:
-      # BDD
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
-
-      # Queue
-      - EXECUTIONS_MODE=queue
-      - QUEUE_BULL_REDIS_HOST=redis
-      - QUEUE_HEALTH_CHECK_ACTIVE=true
-
-      # Clé de chiffrement
-      - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
-
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
 
   ##########################################################################
   # OLLAMA (CPU)
