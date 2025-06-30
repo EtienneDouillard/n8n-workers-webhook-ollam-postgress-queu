@@ -14,7 +14,6 @@ A Docker stack hosting:
 
     n8n (main) → 1 CPU
     n8n-worker → 1 CPU
-    n8n-webhook → 0.5 CPU
     PostgreSQL 
     Redis (for queue mode)
     Ollama → 1 CPU
